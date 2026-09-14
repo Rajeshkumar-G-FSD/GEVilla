@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "430436618607",
+    "project_id": "greenedgevilla-dafbc",
+    "storage_bucket": "greenedgevilla-dafbc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:430436618607:android:c52c9ec7b3693067fd189a",
+        "android_client_info": {
+          "package_name": "com.datazync.greenedgevilla"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCfnAMCsETvqhQKCBSNcXwzGuDJh8buzSM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

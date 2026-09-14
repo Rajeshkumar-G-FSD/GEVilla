@@ -6,15 +6,15 @@ plugins {
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
-  alias(libs.plugins.google.services)
+  id("com.google.gms.google-services")
 }
 
 android {
-  namespace = "com.example"
+  namespace = "com.datazync.greenedgevilla"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.greenedge.xkyw"
+    applicationId = "com.datazync.greenedgevilla"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
@@ -77,7 +77,8 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform(libs.firebase.bom))
+  implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+  implementation("com.google.firebase:firebase-analytics")
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
