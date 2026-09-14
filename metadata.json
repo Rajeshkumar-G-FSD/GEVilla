@@ -1,0 +1,6 @@
+{
+  "name": "Green Edge Villa",
+  "description": "Luxury resort room-booking app for Green Edge Villa in Ooty with real-time room inventory, multi-step booking, and OTA management dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
