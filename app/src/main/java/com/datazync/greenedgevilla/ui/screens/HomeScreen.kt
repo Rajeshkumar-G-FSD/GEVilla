@@ -1,7 +1,9 @@
 package com.datazync.greenedgevilla.ui.screens
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -436,17 +438,26 @@ fun HomeOfferCard(
 }
 
 fun shareLocationIntent(context: Context) {
-    val sendIntent = Intent().apply {
-        action = Intent.ACTION_SEND
-        putExtra(
-            Intent.EXTRA_TEXT,
-            "Green Edge Villa, Ooty\n" +
-                    "Address: Amma's Kitchen opposite, Rokini Junction, Mysuru Road, Ooty, Tamil Nadu 643001\n" +
-                    "Google Maps: https://maps.google.com/?q=11.4138,76.6958\n" +
-                    "Contact: +91 94882 12345"
-        )
+    val message =
+        "Green Edge Villa, Ooty\n" +
+                "Address: Amma's Kitchen opposite, Rokini Junction, Mysuru Road, Ooty, Tamil Nadu 643001\n" +
+                "Google Maps: https://maps.google.com/?q=11.4138,76.6958\n" +
+                "Contact: +91 94882 12345 / +91 94433 67890"
+
+    // Prefer sharing straight to WhatsApp; fall back to the system share sheet if it's not installed.
+    val whatsAppIntent = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, message)
+        setPackage("com.whatsapp")
     }
-    val shareIntent = Intent.createChooser(sendIntent, "Share Green Edge Villa Location")
-    context.startActivity(shareIntent)
+    try {
+        context.startActivity(whatsAppIntent)
+    } catch (e: ActivityNotFoundException) {
+        Toast.makeText(context, "WhatsApp not installed — opening share menu instead.", Toast.LENGTH_SHORT).show()
+        val genericIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, message)
+        }
+        context.startActivity(Intent.createChooser(genericIntent, "Share Green Edge Villa Location"))
+    }
 }

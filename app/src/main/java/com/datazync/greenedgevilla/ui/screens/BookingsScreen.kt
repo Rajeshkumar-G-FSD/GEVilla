@@ -23,9 +23,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.EventAvailable
 import androidx.compose.material.icons.filled.EventBusy
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -50,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -57,7 +60,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.datazync.greenedgevilla.data.model.Booking
+import com.datazync.greenedgevilla.data.model.RoomUnit
+import com.datazync.greenedgevilla.data.model.UnitAvailabilityStatus
 import com.datazync.greenedgevilla.ui.components.OtaSourceBadge
+import com.datazync.greenedgevilla.ui.components.RoomUnitCard
 import com.datazync.greenedgevilla.ui.components.formatCurrency
 import com.datazync.greenedgevilla.ui.theme.ForestGreenDark
 import com.datazync.greenedgevilla.ui.theme.ForestGreenLight
@@ -82,18 +88,29 @@ import com.datazync.greenedgevilla.ui.viewmodel.VillaViewModel
 fun BookingsScreen(
     viewModel: VillaViewModel,
     onBookNewStay: () -> Unit,
+    onOpenRoomDetail: (RoomUnit) -> Unit = {},
+    onBookUnit: (RoomUnit) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val allBookings by viewModel.allBookings.collectAsStateWithLifecycle()
+    val allUnits by viewModel.allUnits.collectAsStateWithLifecycle()
     val bookingToCancel by viewModel.bookingToCancel.collectAsStateWithLifecycle()
 
-    var selectedTab by remember { mutableStateOf("All") }
-    val tabs = listOf("All", "Upcoming", "Current Stay", "Completed", "Cancelled")
+    var mainTab by remember { mutableStateOf("Booked") }
+    var selectedStatusTab by remember { mutableStateOf("All") }
+    val statusTabs = listOf("All", "Upcoming", "Current Stay", "Completed", "Cancelled")
 
-    val filteredList = remember(allBookings, selectedTab) {
-        if (selectedTab == "All") allBookings
-        else allBookings.filter { it.bookingStatus.equals(selectedTab, ignoreCase = true) }
+    val filteredList = remember(allBookings, selectedStatusTab) {
+        if (selectedStatusTab == "All") allBookings
+        else allBookings.filter { it.bookingStatus.equals(selectedStatusTab, ignoreCase = true) }
+    }
+
+    val availableUnits = remember(allUnits, allBookings) {
+        allUnits.filter { unit ->
+            val status = viewModel.getUnitStatusForToday(unit)
+            status == UnitAvailabilityStatus.AVAILABLE || status == UnitAvailabilityStatus.CHECK_OUT_TODAY
+        }
     }
 
     LazyColumn(
@@ -118,7 +135,7 @@ fun BookingsScreen(
                         color = ForestGreenPrimary
                     )
                     Text(
-                        text = "Track stays, view confirmation receipts, and manage dates",
+                        text = "Track stays or see what's open to book right now",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
                     )
@@ -135,79 +152,113 @@ fun BookingsScreen(
             }
         }
 
-        // Status Tabs
+        // Booked Rooms / Available Rooms segmented switch
         item {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(WarmBeigeSurfaceVariant, RoundedCornerShape(12.dp))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                items(tabs) { tab ->
-                    val isSelected = selectedTab == tab
-                    val count = if (tab == "All") allBookings.size else allBookings.count { it.bookingStatus.equals(tab, ignoreCase = true) }
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { selectedTab = tab },
-                        label = { Text("$tab ($count)") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = ForestGreenPrimary,
-                            selectedLabelColor = Color.White,
-                            containerColor = MaterialTheme.colorScheme.surface,
-                            labelColor = TextPrimary
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            borderColor = WarmBeigeBorder,
-                            selectedBorderColor = ForestGreenPrimary,
-                            enabled = true,
-                            selected = isSelected
-                        )
-                    )
-                }
+                MainTabButton(
+                    label = "Booked Rooms (${allBookings.size})",
+                    icon = Icons.Default.ReceiptLong,
+                    isSelected = mainTab == "Booked",
+                    onClick = { mainTab = "Booked" },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("bookings_tab_booked")
+                )
+                MainTabButton(
+                    label = "Available (${availableUnits.size})",
+                    icon = Icons.Default.EventAvailable,
+                    isSelected = mainTab == "Available",
+                    onClick = { mainTab = "Available" },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("bookings_tab_available")
+                )
             }
         }
 
-        if (filteredList.isEmpty()) {
+        if (mainTab == "Booked") {
+            // Status Tabs
             item {
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, WarmBeigeBorder),
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(30.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.EventBusy,
-                            contentDescription = null,
-                            tint = TextSecondary,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "No $selectedTab Bookings Found",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = ForestGreenPrimary
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Any bookings reserved through the app or synced from OTAs appear here.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextSecondary
+                    items(statusTabs) { tab ->
+                        val isSelected = selectedStatusTab == tab
+                        val count = if (tab == "All") allBookings.size else allBookings.count { it.bookingStatus.equals(tab, ignoreCase = true) }
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { selectedStatusTab = tab },
+                            label = { Text("$tab ($count)") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = ForestGreenPrimary,
+                                selectedLabelColor = Color.White,
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                labelColor = TextPrimary
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                borderColor = WarmBeigeBorder,
+                                selectedBorderColor = ForestGreenPrimary,
+                                enabled = true,
+                                selected = isSelected
+                            )
                         )
                     }
                 }
             }
+
+            if (filteredList.isEmpty()) {
+                item {
+                    EmptyStateCard(
+                        icon = Icons.Default.EventBusy,
+                        title = "No $selectedStatusTab Bookings Found",
+                        subtitle = "Any bookings reserved through the app or synced from OTAs appear here."
+                    )
+                }
+            } else {
+                items(filteredList, key = { it.id }) { booking ->
+                    BookingCardItem(
+                        booking = booking,
+                        onRequestCancel = { viewModel.requestCancelBooking(booking) },
+                        onShareReceipt = { shareBookingReceipt(context, booking) }
+                    )
+                }
+            }
         } else {
-            items(filteredList, key = { it.id }) { booking ->
-                BookingCardItem(
-                    booking = booking,
-                    onRequestCancel = { viewModel.requestCancelBooking(booking) },
-                    onShareReceipt = { shareBookingReceipt(context, booking) }
+            // Available Rooms
+            item {
+                Text(
+                    text = "Open for booking today",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = ForestGreenPrimary
                 )
+            }
+
+            if (availableUnits.isEmpty()) {
+                item {
+                    EmptyStateCard(
+                        icon = Icons.Default.EventBusy,
+                        title = "No Rooms Available Right Now",
+                        subtitle = "All villas are currently booked or blocked. Check back soon or contact us for upcoming openings."
+                    )
+                }
+            } else {
+                items(availableUnits, key = { it.id }) { unit ->
+                    val status = viewModel.getUnitStatusForToday(unit)
+                    RoomUnitCard(
+                        unit = unit,
+                        status = status,
+                        onViewDetails = { onOpenRoomDetail(unit) },
+                        onBookNow = { onBookUnit(unit) }
+                    )
+                }
             }
         }
     }
@@ -245,6 +296,81 @@ fun BookingsScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+fun MainTabButton(
+    label: String,
+    icon: ImageVector,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(9.dp),
+        color = if (isSelected) ForestGreenPrimary else Color.Transparent,
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (isSelected) Color.White else TextSecondary,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = label,
+                color = if (isSelected) Color.White else TextSecondary,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+fun EmptyStateCard(icon: ImageVector, title: String, subtitle: String) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, WarmBeigeBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(30.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = TextSecondary,
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = ForestGreenPrimary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
     }
 }
 

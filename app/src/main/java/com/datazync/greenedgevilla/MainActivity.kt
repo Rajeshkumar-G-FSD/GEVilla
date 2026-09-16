@@ -11,9 +11,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.MeetingRoom
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,7 +22,11 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -32,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.datazync.greenedgevilla.ui.screens.AdminDashboardScreen
+import com.datazync.greenedgevilla.ui.screens.AdminLoginScreen
 import com.datazync.greenedgevilla.ui.screens.BookingFlowScreen
 import com.datazync.greenedgevilla.ui.screens.BookingsScreen
 import com.datazync.greenedgevilla.ui.screens.HomeScreen
@@ -39,6 +43,8 @@ import com.datazync.greenedgevilla.ui.screens.OffersScreen
 import com.datazync.greenedgevilla.ui.screens.ProfileScreen
 import com.datazync.greenedgevilla.ui.screens.RoomDetailScreen
 import com.datazync.greenedgevilla.ui.screens.RoomsScreen
+import com.datazync.greenedgevilla.ui.screens.SPLASH_DURATION_MILLIS
+import com.datazync.greenedgevilla.ui.screens.SplashScreen
 import com.datazync.greenedgevilla.ui.theme.ForestGreenDark
 import com.datazync.greenedgevilla.ui.theme.ForestGreenPrimary
 import com.datazync.greenedgevilla.ui.theme.GoldAccent
@@ -47,6 +53,7 @@ import com.datazync.greenedgevilla.ui.theme.TextSecondary
 import com.datazync.greenedgevilla.ui.theme.WarmBeigeBackground
 import com.datazync.greenedgevilla.ui.viewmodel.NavTab
 import com.datazync.greenedgevilla.ui.viewmodel.VillaViewModel
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,9 +61,20 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             GreenEdgeVillaTheme {
-                val context = androidx.compose.ui.platform.LocalContext.current
-                val viewModel: VillaViewModel = viewModel(factory = VillaViewModel.provideFactory(context))
-                MainAppScreen(viewModel = viewModel)
+                var showSplash by remember { mutableStateOf(true) }
+
+                LaunchedEffect(Unit) {
+                    delay(SPLASH_DURATION_MILLIS)
+                    showSplash = false
+                }
+
+                if (showSplash) {
+                    SplashScreen()
+                } else {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val viewModel: VillaViewModel = viewModel(factory = VillaViewModel.provideFactory(context))
+                    MainAppScreen(viewModel = viewModel)
+                }
             }
         }
     }
@@ -67,15 +85,16 @@ fun MainAppScreen(viewModel: VillaViewModel) {
     val currentTab by viewModel.currentNavTab.collectAsStateWithLifecycle()
     val selectedDetail by viewModel.selectedRoomDetail.collectAsStateWithLifecycle()
     val isBookingFlowActive by viewModel.isBookingFlowActive.collectAsStateWithLifecycle()
+    val isAdminAuthenticated by viewModel.isAdminAuthenticated.collectAsStateWithLifecycle()
 
     // Handle Android system back button
-    BackHandler(enabled = isBookingFlowActive || selectedDetail != null || currentTab != NavTab.HOME) {
+    BackHandler(enabled = isBookingFlowActive || selectedDetail != null || currentTab != NavTab.ROOMS) {
         if (isBookingFlowActive) {
             viewModel.dismissBookingFlow()
         } else if (selectedDetail != null) {
             viewModel.clearSelectedRoomDetail()
-        } else if (currentTab != NavTab.HOME) {
-            viewModel.setNavTab(NavTab.HOME)
+        } else if (currentTab != NavTab.ROOMS) {
+            viewModel.setNavTab(NavTab.ROOMS)
         }
     }
 
@@ -110,23 +129,8 @@ fun MainAppScreen(viewModel: VillaViewModel) {
                         modifier = Modifier.testTag("main_bottom_nav_bar")
                     ) {
                         NavigationBarItem(
-                            icon = { Icon(Icons.Default.Home, contentDescription = "Home") },
-                            label = { Text("Home", fontWeight = if (currentTab == NavTab.HOME) FontWeight.Bold else FontWeight.Normal) },
-                            selected = currentTab == NavTab.HOME,
-                            onClick = { viewModel.setNavTab(NavTab.HOME) },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = ForestGreenPrimary,
-                                selectedTextColor = ForestGreenPrimary,
-                                indicatorColor = GoldAccent.copy(alpha = 0.2f),
-                                unselectedIconColor = TextSecondary,
-                                unselectedTextColor = TextSecondary
-                            ),
-                            modifier = Modifier.testTag("nav_tab_home")
-                        )
-
-                        NavigationBarItem(
-                            icon = { Icon(Icons.Default.MeetingRoom, contentDescription = "Rooms") },
-                            label = { Text("Rooms", fontWeight = if (currentTab == NavTab.ROOMS) FontWeight.Bold else FontWeight.Normal) },
+                            icon = { Icon(Icons.Default.MeetingRoom, contentDescription = "Book Rooms") },
+                            label = { Text("Book Rooms", fontWeight = if (currentTab == NavTab.ROOMS) FontWeight.Bold else FontWeight.Normal) },
                             selected = currentTab == NavTab.ROOMS,
                             onClick = { viewModel.setNavTab(NavTab.ROOMS) },
                             colors = NavigationBarItemDefaults.colors(
@@ -140,8 +144,8 @@ fun MainAppScreen(viewModel: VillaViewModel) {
                         )
 
                         NavigationBarItem(
-                            icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "Bookings") },
-                            label = { Text("Bookings", fontWeight = if (currentTab == NavTab.BOOKINGS) FontWeight.Bold else FontWeight.Normal) },
+                            icon = { Icon(Icons.Default.ReceiptLong, contentDescription = "My Bookings") },
+                            label = { Text("My Bookings", fontWeight = if (currentTab == NavTab.BOOKINGS) FontWeight.Bold else FontWeight.Normal) },
                             selected = currentTab == NavTab.BOOKINGS,
                             onClick = { viewModel.setNavTab(NavTab.BOOKINGS) },
                             colors = NavigationBarItemDefaults.colors(
@@ -155,10 +159,10 @@ fun MainAppScreen(viewModel: VillaViewModel) {
                         )
 
                         NavigationBarItem(
-                            icon = { Icon(Icons.Default.LocalOffer, contentDescription = "Offers") },
-                            label = { Text("Offers", fontWeight = if (currentTab == NavTab.OFFERS) FontWeight.Bold else FontWeight.Normal) },
-                            selected = currentTab == NavTab.OFFERS,
-                            onClick = { viewModel.setNavTab(NavTab.OFFERS) },
+                            icon = { Icon(Icons.Default.Phone, contentDescription = "Contact") },
+                            label = { Text("Contact", fontWeight = if (currentTab == NavTab.PROFILE) FontWeight.Bold else FontWeight.Normal) },
+                            selected = currentTab == NavTab.PROFILE,
+                            onClick = { viewModel.setNavTab(NavTab.PROFILE) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = ForestGreenPrimary,
                                 selectedTextColor = ForestGreenPrimary,
@@ -166,7 +170,7 @@ fun MainAppScreen(viewModel: VillaViewModel) {
                                 unselectedIconColor = TextSecondary,
                                 unselectedTextColor = TextSecondary
                             ),
-                            modifier = Modifier.testTag("nav_tab_offers")
+                            modifier = Modifier.testTag("nav_tab_contact")
                         )
 
                         NavigationBarItem(
@@ -209,7 +213,9 @@ fun MainAppScreen(viewModel: VillaViewModel) {
                         NavTab.BOOKINGS -> {
                             BookingsScreen(
                                 viewModel = viewModel,
-                                onBookNewStay = { viewModel.startBookingFlow() }
+                                onBookNewStay = { viewModel.startBookingFlow() },
+                                onOpenRoomDetail = { viewModel.setSelectedRoomDetail(it) },
+                                onBookUnit = { viewModel.startBookingFlowForUnit(it) }
                             )
                         }
 
@@ -223,9 +229,16 @@ fun MainAppScreen(viewModel: VillaViewModel) {
                         }
 
                         NavTab.ADMIN -> {
-                            AdminDashboardScreen(
-                                viewModel = viewModel
-                            )
+                            if (isAdminAuthenticated) {
+                                AdminDashboardScreen(
+                                    viewModel = viewModel
+                                )
+                            } else {
+                                AdminLoginScreen(
+                                    viewModel = viewModel,
+                                    onBack = { viewModel.setNavTab(NavTab.ROOMS) }
+                                )
+                            }
                         }
 
                         NavTab.PROFILE -> {

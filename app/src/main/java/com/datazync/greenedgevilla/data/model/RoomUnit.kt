@@ -1,11 +1,8 @@
 package com.datazync.greenedgevilla.data.model
 
-import androidx.room.Entity
-import androidx.room.PrimaryKey
-
-@Entity(tableName = "room_units")
+/** Stored in Firestore under the "room_units" collection, one document per unit (doc id == [id]). */
 data class RoomUnit(
-    @PrimaryKey val id: String, // e.g. "A1", "A2", "B1", "B2", "C1", "D1"
+    val id: String, // e.g. "A1", "A2", "B1", "B2", "C1", "D1"
     val block: String,          // "Block A", "Block B", "Block C", "Block D"
     val bhkType: String,        // "3 BHK", "2 BHK", "1 BHK"
     val bedroomCount: Int,      // 3, 2, 1

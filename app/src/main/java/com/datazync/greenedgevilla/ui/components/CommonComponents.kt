@@ -65,6 +65,7 @@ import com.datazync.greenedgevilla.ui.theme.OnGoldContainer
 import com.datazync.greenedgevilla.ui.theme.OtaAgoda
 import com.datazync.greenedgevilla.ui.theme.OtaBookingCom
 import com.datazync.greenedgevilla.ui.theme.OtaDirect
+import com.datazync.greenedgevilla.ui.theme.OtaGoibibo
 import com.datazync.greenedgevilla.ui.theme.OtaMakeMyTrip
 import com.datazync.greenedgevilla.ui.theme.OtaVoye
 import com.datazync.greenedgevilla.ui.theme.OtaWalkIn
@@ -149,9 +150,12 @@ fun OtaSourceBadge(
         source.contains("Agoda", ignoreCase = true) -> Pair(OtaAgoda, "Agoda")
         source.contains("MakeMyTrip", ignoreCase = true) || source.contains("MMT", ignoreCase = true) -> Pair(OtaMakeMyTrip, "MakeMyTrip")
         source.contains("VOYE", ignoreCase = true) -> Pair(OtaVoye, "VOYE")
+        source.contains("Goibibo", ignoreCase = true) -> Pair(OtaGoibibo, "Goibibo")
         source.contains("Booking.com", ignoreCase = true) -> Pair(OtaBookingCom, "Booking.com")
         source.contains("Direct", ignoreCase = true) -> Pair(OtaDirect, "Direct App")
-        else -> Pair(OtaWalkIn, source)
+        source.contains("Walk-in", ignoreCase = true) -> Pair(OtaWalkIn, "Walk-in")
+        source.isBlank() -> Pair(OtaWalkIn, "Direct App")
+        else -> Pair(OtaWalkIn, source) // Custom / "Others" typed reference name
     }
 
     Surface(

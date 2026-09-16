@@ -1,9 +1,16 @@
 package com.datazync.greenedgevilla.ui.screens
 
 import android.widget.Toast
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,13 +31,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bed
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CurrencyRupee
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.LockOpen
@@ -39,6 +49,7 @@ import androidx.compose.material.icons.filled.MonetizationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Receipt
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,7 +73,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -70,11 +83,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -118,6 +133,9 @@ fun AdminDashboardScreen(
     val allUnits by viewModel.allUnits.collectAsStateWithLifecycle()
     val allBookings by viewModel.allBookings.collectAsStateWithLifecycle()
     val stats by viewModel.adminSummaryStats.collectAsStateWithLifecycle()
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val syncError by viewModel.syncError.collectAsStateWithLifecycle()
+    val roomForPriceEdit by viewModel.roomForPriceEdit.collectAsStateWithLifecycle()
 
     var selectedDashboardTab by remember { mutableIntStateOf(0) } // 0: Overview & Units, 1: Current Date, 2: Upcoming Dates
     var selectedOtaFilter by remember { mutableStateOf("All Sources") }
@@ -125,45 +143,110 @@ fun AdminDashboardScreen(
 
     val otaSources = listOf("All Sources", "Direct", "Agoda", "MakeMyTrip", "VOYE", "Booking.com", "Walk-in")
 
-    LazyColumn(
+    // Surface Firestore sync problems (offline, rules, etc.) without interrupting the UI.
+    LaunchedEffect(syncError) {
+        syncError?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+    }
+
+    val refreshRotation by rememberInfiniteTransition(label = "refresh_spin").animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "refresh_spin_angle"
+    )
+
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = { viewModel.refreshDashboard() },
         modifier = modifier
             .fillMaxSize()
             .background(WarmBeigeBackground)
+    ) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
             .testTag("admin_dashboard_scroll"),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 90.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // Dashboard Header
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Villa Manager",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = ForestGreenPrimary
-                    )
-                    Text(
-                        text = "Real-time inventory, OTA tracking & reservations",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Villa Manager",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = ForestGreenPrimary
+                        )
+                        Text(
+                            text = "Real-time inventory, OTA tracking & reservations",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = WarmBeigeSurfaceVariant,
+                        border = BorderStroke(1.dp, WarmBeigeBorder),
+                        modifier = Modifier.testTag("admin_logout_btn")
+                    ) {
+                        IconButton(onClick = { viewModel.logoutAdmin() }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Logout,
+                                contentDescription = "Log out",
+                                tint = Color(0xFFC62828)
+                            )
+                        }
+                    }
                 }
 
-                Button(
-                    onClick = { showAddBookingDialog = true },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = ForestGreenPrimary),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.testTag("admin_record_booking_btn")
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Add Booking", style = MaterialTheme.typography.labelMedium)
+                    Surface(
+                        shape = CircleShape,
+                        color = WarmBeigeSurfaceVariant,
+                        border = BorderStroke(1.dp, WarmBeigeBorder),
+                        modifier = Modifier.testTag("admin_refresh_btn")
+                    ) {
+                        IconButton(
+                            onClick = { viewModel.refreshDashboard() },
+                            enabled = !isRefreshing
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Refresh dashboard",
+                                tint = ForestGreenPrimary,
+                                modifier = Modifier.rotate(if (isRefreshing) refreshRotation else 0f)
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = { showAddBookingDialog = true },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ForestGreenPrimary),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                        modifier = Modifier.testTag("admin_record_booking_btn")
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Booking", style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
         }
@@ -251,6 +334,11 @@ fun AdminDashboardScreen(
                     selected = selectedDashboardTab == 2,
                     onClick = { selectedDashboardTab = 2 },
                     text = { Text("Upcoming (${stats.upcomingDateBookingsCount})", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium) }
+                )
+                Tab(
+                    selected = selectedDashboardTab == 3,
+                    onClick = { selectedDashboardTab = 3 },
+                    text = { Text("Pricing", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelMedium) }
                 )
             }
         }
@@ -372,8 +460,35 @@ fun AdminDashboardScreen(
                     }
                 }
             }
+
+            3 -> {
+                // ROOM PRICING TAB
+                item {
+                    Column {
+                        Text(
+                            text = "Room Pricing",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = ForestGreenPrimary
+                        )
+                        Text(
+                            text = "Adjust the nightly rate for any room — changes sync to every guest screen instantly, and confirm on the next Refresh.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
+                }
+
+                items(allUnits, key = { "price_${it.id}" }) { unit ->
+                    RoomPriceRow(
+                        unit = unit,
+                        onEditPrice = { viewModel.promptPriceEdit(unit) }
+                    )
+                }
+            }
         }
     }
+    } // PullToRefreshBox
 
     // Manual/OTA Booking Dialog
     if (showAddBookingDialog) {
@@ -398,6 +513,174 @@ fun AdminDashboardScreen(
                 Toast.makeText(context, "Booking recorded from $source", Toast.LENGTH_SHORT).show()
             }
         )
+    }
+
+    // Room Price Edit Dialog
+    if (roomForPriceEdit != null) {
+        val unit = roomForPriceEdit!!
+        PriceEditDialog(
+            unit = unit,
+            onDismiss = { viewModel.dismissPriceEdit() },
+            onSave = { newPrice ->
+                viewModel.savePriceEdit(newPrice)
+                Toast.makeText(
+                    context,
+                    "Unit ${unit.id} price updated to ${formatCurrency(newPrice)}/night",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        )
+    }
+}
+
+@Composable
+fun RoomPriceRow(
+    unit: RoomUnit,
+    onEditPrice: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, WarmBeigeBorder),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${unit.block} — Unit ${unit.id}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = ForestGreenPrimary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(color = WarmBeigeSurfaceVariant, shape = RoundedCornerShape(6.dp)) {
+                        Text(
+                            text = unit.bhkType,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = ForestGreenDark,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${formatCurrency(unit.pricePerNight)} / night",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = GoldAccent
+                )
+                if (unit.isBlocked) {
+                    Text(
+                        text = "Blocked for maintenance",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color(0xFFC62828)
+                    )
+                }
+            }
+
+            OutlinedButton(
+                onClick = onEditPrice,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, ForestGreenPrimary),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ForestGreenPrimary),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.testTag("edit_price_${unit.id}")
+            ) {
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Edit Price", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun PriceEditDialog(
+    unit: RoomUnit,
+    onDismiss: () -> Unit,
+    onSave: (Double) -> Unit
+) {
+    var priceText by remember(unit.id) { mutableStateOf(unit.pricePerNight.toInt().toString()) }
+    val newPrice = priceText.toDoubleOrNull()
+    val isValid = newPrice != null && newPrice > 0
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(22.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CurrencyRupee, contentDescription = null, tint = ForestGreenPrimary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Adjust Price",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = ForestGreenPrimary
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${unit.block} — Unit ${unit.id} (${unit.bhkType})",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                OutlinedTextField(
+                    value = priceText,
+                    onValueChange = { input -> priceText = input.filter { it.isDigit() } },
+                    label = { Text("Price per night (₹)") },
+                    singleLine = true,
+                    isError = !isValid,
+                    supportingText = {
+                        if (!isValid) Text("Enter a valid amount greater than 0", color = Color(0xFFC62828))
+                    },
+                    leadingIcon = { Icon(Icons.Default.CurrencyRupee, contentDescription = null, tint = ForestGreenPrimary) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("price_edit_field"),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = ForestGreenPrimary,
+                        focusedLabelColor = ForestGreenPrimary
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { newPrice?.let(onSave) },
+                        enabled = isValid,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = ForestGreenPrimary),
+                        modifier = Modifier.testTag("price_edit_save_btn")
+                    ) {
+                        Text("Save Price", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -54,15 +55,26 @@ data class AdminSummaryStats(
 )
 
 class VillaViewModel(
-    private val repository: VillaRepository
+    private val repository: VillaRepository,
+    private val adminSession: com.datazync.greenedgevilla.data.session.AdminSession
 ) : ViewModel() {
 
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val today: LocalDate = LocalDate.now()
 
     // Navigation & Screen presentation state
-    private val _currentTab = MutableStateFlow(NavTab.HOME)
+    private val _currentTab = MutableStateFlow(NavTab.ROOMS)
     val currentTab: StateFlow<NavTab> = _currentTab.asStateFlow()
+
+    // Admin login gate
+    private val _isAdminAuthenticated = MutableStateFlow(adminSession.isLoggedIn)
+    val isAdminAuthenticated: StateFlow<Boolean> = _isAdminAuthenticated.asStateFlow()
+
+    private val _adminLoginError = MutableStateFlow<String?>(null)
+    val adminLoginError: StateFlow<String?> = _adminLoginError.asStateFlow()
+
+    private val _isAdminLoggingIn = MutableStateFlow(false)
+    val isAdminLoggingIn: StateFlow<Boolean> = _isAdminLoggingIn.asStateFlow()
 
     private val _selectedRoom = MutableStateFlow<RoomUnit?>(null)
     val selectedRoom: StateFlow<RoomUnit?> = _selectedRoom.asStateFlow()
@@ -121,6 +133,13 @@ class VillaViewModel(
     private val _specialRequests = MutableStateFlow("")
     val specialRequests: StateFlow<String> = _specialRequests.asStateFlow()
 
+    // Booking source / OTA reference (how the guest found/is booking this stay)
+    private val _bookingSourceOta = MutableStateFlow("Direct")
+    val bookingSourceOta: StateFlow<String> = _bookingSourceOta.asStateFlow()
+
+    private val _bookingSourceOtherText = MutableStateFlow("")
+    val bookingSourceOtherText: StateFlow<String> = _bookingSourceOtherText.asStateFlow()
+
     private val _selectedPaymentMethod = MutableStateFlow("UPI")
     val selectedPaymentMethod: StateFlow<String> = _selectedPaymentMethod.asStateFlow()
 
@@ -152,6 +171,13 @@ class VillaViewModel(
 
     private val _isQuickAddAdminBookingOpen = MutableStateFlow(false)
     val isQuickAddAdminBookingOpen: StateFlow<Boolean> = _isQuickAddAdminBookingOpen.asStateFlow()
+
+    // Dashboard pull-to-refresh state
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
+    /** Firestore sync error, if the live listeners hit one (e.g. no network, rules denial). */
+    val syncError: StateFlow<String?> = repository.syncError
 
     // Base flows from repository
     val allUnits: StateFlow<List<RoomUnit>> = repository.allUnits
@@ -353,6 +379,8 @@ class VillaViewModel(
         _isBookingFlowActive.value = true
         _bookingErrorMessage.value = null
         _appliedOffer.value = null
+        _bookingSourceOta.value = "Direct"
+        _bookingSourceOtherText.value = ""
     }
 
     fun setBookingFlowStep(step: Int) {
@@ -368,6 +396,11 @@ class VillaViewModel(
         _guestMobile.value = mobile
         _guestEmail.value = email
         _specialRequests.value = special
+    }
+
+    fun updateBookingSource(otaSource: String, otherText: String = _bookingSourceOtherText.value) {
+        _bookingSourceOta.value = otaSource
+        _bookingSourceOtherText.value = if (otaSource == "Others") otherText else ""
     }
 
     fun setPaymentMethod(method: String) {
@@ -421,8 +454,14 @@ class VillaViewModel(
             paymentMethod = _selectedPaymentMethod.value,
             paymentStatus = if (_selectedPaymentMethod.value == "Pay at Hotel") "Pending" else "Paid",
             bookingStatus = "Upcoming",
-            source = "Direct App",
-            referenceName = "App Direct Booking"
+            source = if (_bookingSourceOta.value == "Others") {
+                _bookingSourceOtherText.value.ifBlank { "Other" }
+            } else if (_bookingSourceOta.value == "Direct") {
+                "Direct App"
+            } else {
+                _bookingSourceOta.value
+            },
+            referenceName = if (_bookingSourceOta.value == "Direct") "App Direct Booking" else ""
         )
 
         viewModelScope.launch {
@@ -570,6 +609,53 @@ class VillaViewModel(
     fun dismissBookingFlow() = closeBookingFlow()
     fun startBookingFlowForUnit(unit: RoomUnit) = startBookingFlow(unit)
 
+    fun attemptAdminLogin(email: String, password: String) {
+        if (_isAdminLoggingIn.value) return
+        viewModelScope.launch {
+            _isAdminLoggingIn.value = true
+            _adminLoginError.value = null
+            delay(450) // smooth minimum-visible loading state, matches dashboard refresh feel
+            val emailMatches = email.trim().equals(
+                com.datazync.greenedgevilla.data.session.AdminCredentials.EMAIL,
+                ignoreCase = true
+            )
+            val passwordMatches = password == com.datazync.greenedgevilla.data.session.AdminCredentials.PASSWORD
+            if (emailMatches && passwordMatches) {
+                adminSession.isLoggedIn = true
+                _isAdminAuthenticated.value = true
+            } else {
+                _adminLoginError.value = "Incorrect email or password."
+            }
+            _isAdminLoggingIn.value = false
+        }
+    }
+
+    fun clearAdminLoginError() {
+        _adminLoginError.value = null
+    }
+
+    fun logoutAdmin() {
+        adminSession.isLoggedIn = false
+        _isAdminAuthenticated.value = false
+        setNavTab(NavTab.ROOMS)
+    }
+
+    /**
+     * Pull-to-refresh / refresh-button handler for the Admin dashboard. Forces a fresh
+     * server fetch and keeps the spinner up for a minimum visible duration so it always
+     * reads as a deliberate, smooth action rather than a flash.
+     */
+    fun refreshDashboard() {
+        if (_isRefreshing.value) return
+        viewModelScope.launch {
+            _isRefreshing.value = true
+            val minSpinner = launch { delay(500) }
+            repository.refreshNow()
+            minSpinner.join()
+            _isRefreshing.value = false
+        }
+    }
+
     fun toggleUnitBlock(unit: RoomUnit) {
         viewModelScope.launch {
             repository.toggleRoomBlock(unit.id, !unit.isBlocked, if (unit.isBlocked) "Available" else "Maintenance")
@@ -624,22 +710,34 @@ class VillaViewModel(
     }
 
     companion object {
+        // One Firestore-backed repository (and its two snapshot listeners) for the whole app,
+        // regardless of how many times a ViewModel gets recreated.
+        @Volatile private var repositoryInstance: VillaRepository? = null
+
+        private fun getOrCreateRepository(): VillaRepository =
+            repositoryInstance ?: synchronized(this) {
+                repositoryInstance ?: VillaRepository(com.google.firebase.firestore.FirebaseFirestore.getInstance())
+                    .also { repositoryInstance = it }
+            }
+
         fun provideFactory(context: android.content.Context): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                val db = com.datazync.greenedgevilla.data.local.AppDatabase.getInstance(context.applicationContext)
-                val repo = com.datazync.greenedgevilla.data.repository.VillaRepository(db.roomDao(), db.bookingDao())
-                return VillaViewModel(repo) as T
+                val adminSession = com.datazync.greenedgevilla.data.session.AdminSession(context.applicationContext)
+                return VillaViewModel(getOrCreateRepository(), adminSession) as T
             }
         }
     }
 }
 
-class VillaViewModelFactory(private val repository: VillaRepository) : ViewModelProvider.Factory {
+class VillaViewModelFactory(
+    private val repository: VillaRepository,
+    private val adminSession: com.datazync.greenedgevilla.data.session.AdminSession
+) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(VillaViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return VillaViewModel(repository) as T
+            return VillaViewModel(repository, adminSession) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

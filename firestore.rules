@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // TEMPORARY development rules.
+    //
+    // The app currently has no user sign-in — both the guest booking flow and the
+    // Admin dashboard read/write Firestore anonymously — so these collections are
+    // left open. Before a public/production launch:
+    //   1. Add Firebase Auth and gate the Admin tab behind a signed-in admin account.
+    //   2. Replace the rules below with something like:
+    //        match /room_units/{unitId} {
+    //          allow read: if true;                                   // guests browse rooms
+    //          allow write: if request.auth != null && request.auth.token.admin == true;
+    //        }
+    //        match /bookings/{bookingId} {
+    //          allow read: if request.auth != null;                   // or scope to the guest's own bookings
+    //          allow create: if true;                                 // guest checkout flow
+    //          allow update, delete: if request.auth != null && request.auth.token.admin == true;
+    //        }
+
+    match /room_units/{unitId} {
+      allow read, write: if true;
+    }
+
+    match /bookings/{bookingId} {
+      allow read, write: if true;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

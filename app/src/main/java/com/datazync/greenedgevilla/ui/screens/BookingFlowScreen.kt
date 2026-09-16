@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,6 +53,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -120,6 +123,8 @@ fun BookingFlowScreen(
     val guestMobile by viewModel.guestMobile.collectAsStateWithLifecycle()
     val guestEmail by viewModel.guestEmail.collectAsStateWithLifecycle()
     val specialReq by viewModel.specialRequests.collectAsStateWithLifecycle()
+    val sourceOta by viewModel.bookingSourceOta.collectAsStateWithLifecycle()
+    val sourceOtherText by viewModel.bookingSourceOtherText.collectAsStateWithLifecycle()
 
     val paymentMethod by viewModel.selectedPaymentMethod.collectAsStateWithLifecycle()
     val confirmedBooking by viewModel.confirmedBooking.collectAsStateWithLifecycle()
@@ -217,10 +222,13 @@ fun BookingFlowScreen(
                                 mobile = guestMobile,
                                 email = guestEmail,
                                 special = specialReq,
+                                sourceOta = sourceOta,
+                                sourceOtherText = sourceOtherText,
                                 onNameChange = { viewModel.updateGuestDetails(it, guestMobile, guestEmail, specialReq) },
                                 onMobileChange = { viewModel.updateGuestDetails(guestName, it, guestEmail, specialReq) },
                                 onEmailChange = { viewModel.updateGuestDetails(guestName, guestMobile, it, specialReq) },
                                 onSpecialChange = { viewModel.updateGuestDetails(guestName, guestMobile, guestEmail, it) },
+                                onSourceChange = { source, other -> viewModel.updateBookingSource(source, other) },
                                 onContinue = { viewModel.setBookingFlowStep(6) }
                             )
                         }
@@ -447,6 +455,8 @@ fun StepSelectUnit(
     }
 }
 
+private val OTA_SOURCE_OPTIONS = listOf("Direct", "MakeMyTrip", "Agoda", "Booking.com", "Goibibo", "Others")
+
 @Composable
 fun StepGuestInfoForm(
     unit: RoomUnit,
@@ -454,10 +464,13 @@ fun StepGuestInfoForm(
     mobile: String,
     email: String,
     special: String,
+    sourceOta: String,
+    sourceOtherText: String,
     onNameChange: (String) -> Unit,
     onMobileChange: (String) -> Unit,
     onEmailChange: (String) -> Unit,
     onSpecialChange: (String) -> Unit,
+    onSourceChange: (String, String) -> Unit,
     onContinue: () -> Unit
 ) {
     LazyColumn(
@@ -478,6 +491,73 @@ fun StepGuestInfoForm(
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
             )
+        }
+
+        // Booking Source / OTA Reference
+        item {
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, WarmBeigeBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(18.dp)) {
+                    Text(
+                        text = "How are you booking this stay?",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = ForestGreenPrimary
+                    )
+                    Text(
+                        text = "Select the platform so we can match your reservation",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(OTA_SOURCE_OPTIONS) { option ->
+                            val isSelected = sourceOta == option
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onSourceChange(option, sourceOtherText) },
+                                label = { Text(if (option == "Direct") "Direct / App" else option) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = ForestGreenPrimary,
+                                    selectedLabelColor = Color.White,
+                                    containerColor = WarmBeigeSurfaceVariant,
+                                    labelColor = TextPrimary
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    borderColor = WarmBeigeBorder,
+                                    selectedBorderColor = ForestGreenPrimary,
+                                    enabled = true,
+                                    selected = isSelected
+                                ),
+                                modifier = Modifier.testTag("ota_source_chip_$option")
+                            )
+                        }
+                    }
+
+                    if (sourceOta == "Others") {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = sourceOtherText,
+                            onValueChange = { onSourceChange("Others", it) },
+                            label = { Text("Enter platform / reference name *") },
+                            placeholder = { Text("e.g. Yatra, TripAdvisor, Travel Agent") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("ota_source_other_field"),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = ForestGreenPrimary,
+                                focusedLabelColor = ForestGreenPrimary
+                            )
+                        )
+                    }
+                }
+            }
         }
 
         item {
@@ -547,7 +627,8 @@ fun StepGuestInfoForm(
 
                     Button(
                         onClick = onContinue,
-                        enabled = name.isNotBlank() && mobile.isNotBlank(),
+                        enabled = name.isNotBlank() && mobile.isNotBlank() &&
+                            (sourceOta != "Others" || sourceOtherText.isNotBlank()),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = ForestGreenPrimary),
                         modifier = Modifier

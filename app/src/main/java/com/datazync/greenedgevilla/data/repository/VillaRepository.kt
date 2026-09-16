@@ -1,24 +1,112 @@
 package com.datazync.greenedgevilla.data.repository
 
-import com.datazync.greenedgevilla.data.local.BookingDao
-import com.datazync.greenedgevilla.data.local.RoomDao
 import com.datazync.greenedgevilla.data.model.Booking
 import com.datazync.greenedgevilla.data.model.Offer
 import com.datazync.greenedgevilla.data.model.RoomUnit
 import com.datazync.greenedgevilla.data.model.UnitAvailabilityStatus
-import kotlinx.coroutines.flow.Flow
+import com.datazync.greenedgevilla.data.remote.BOOKINGS_COLLECTION
+import com.datazync.greenedgevilla.data.remote.SeedData
+import com.datazync.greenedgevilla.data.remote.UNITS_COLLECTION
+import com.datazync.greenedgevilla.data.remote.toBooking
+import com.datazync.greenedgevilla.data.remote.toFirestoreMap
+import com.datazync.greenedgevilla.data.remote.toRoomUnit
+import com.google.android.gms.tasks.Task
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Source
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import kotlin.random.Random
 
+/**
+ * Firestore-backed source of truth for room units & bookings.
+ *
+ * Both [allUnits] and [allBookings] are live-updating [StateFlow]s fed by a single
+ * long-lived `addSnapshotListener` each (registered once, for the lifetime of this
+ * repository instance) — so every screen sees the same, always-current data with no
+ * per-screen re-subscription cost, and writes from any screen (or another device)
+ * reflect everywhere instantly without any manual reload.
+ */
 class VillaRepository(
-    private val roomDao: RoomDao,
-    private val bookingDao: BookingDao
+    private val firestore: FirebaseFirestore
 ) {
-    val allUnits: Flow<List<RoomUnit>> = roomDao.getAllUnitsFlow()
-    val allBookings: Flow<List<Booking>> = bookingDao.getAllBookingsFlow()
-
     private val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    private val repoScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val _allUnits = MutableStateFlow<List<RoomUnit>>(emptyList())
+    val allUnits: StateFlow<List<RoomUnit>> = _allUnits.asStateFlow()
+
+    private val _allBookings = MutableStateFlow<List<Booking>>(emptyList())
+    val allBookings: StateFlow<List<Booking>> = _allBookings.asStateFlow()
+
+    /** Surfaces the most recent Firestore listener error, if any, so the UI can show it. */
+    private val _syncError = MutableStateFlow<String?>(null)
+    val syncError: StateFlow<String?> = _syncError.asStateFlow()
+
+    init {
+        firestore.collection(UNITS_COLLECTION)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    _syncError.value = error.readableMessage()
+                    return@addSnapshotListener
+                }
+                _syncError.value = null
+                _allUnits.value = snapshot?.documents
+                    ?.mapNotNull { it.toRoomUnit() }
+                    ?.sortedBy { it.id }
+                    ?: emptyList()
+            }
+
+        firestore.collection(BOOKINGS_COLLECTION)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    _syncError.value = error.readableMessage()
+                    return@addSnapshotListener
+                }
+                _syncError.value = null
+                _allBookings.value = snapshot?.documents
+                    ?.mapNotNull { it.toBooking() }
+                    ?.sortedByDescending { it.createdTimestamp }
+                    ?: emptyList()
+            }
+
+        repoScope.launch { seedIfEmpty() }
+    }
+
+    /** Writes the built-in demo catalog to Firestore once, only if the collections are empty. */
+    private suspend fun seedIfEmpty() {
+        runCatching {
+            val unitsSnapshot = firestore.collection(UNITS_COLLECTION).get(Source.SERVER).awaitTask()
+            if (unitsSnapshot.isEmpty) {
+                val batch = firestore.batch()
+                SeedData.units.forEach { unit ->
+                    batch.set(firestore.collection(UNITS_COLLECTION).document(unit.id), unit.toFirestoreMap())
+                }
+                batch.commit().awaitTask()
+            }
+
+            val bookingsSnapshot = firestore.collection(BOOKINGS_COLLECTION).get(Source.SERVER).awaitTask()
+            if (bookingsSnapshot.isEmpty) {
+                val batch = firestore.batch()
+                SeedData.bookings.forEach { booking ->
+                    batch.set(firestore.collection(BOOKINGS_COLLECTION).document(booking.id), booking.toFirestoreMap())
+                }
+                batch.commit().awaitTask()
+            }
+        }.onFailure { e ->
+            _syncError.value = (e as? FirebaseFirestoreException)?.readableMessage() ?: e.message
+        }
+    }
 
     fun getOffers(): List<Offer> {
         return listOf(
@@ -82,9 +170,11 @@ class VillaRepository(
 
     /**
      * Checks whether a unit is available between checkIn and checkOut dates.
-     * Prevents double booking for overlapping dates.
+     * Prevents double booking for overlapping dates. Reads from the live in-memory
+     * booking cache (always current — see the snapshot listener above) so this never
+     * blocks on a network round trip.
      */
-    suspend fun isUnitAvailable(
+    fun isUnitAvailable(
         unit: RoomUnit,
         checkIn: LocalDate,
         checkOut: LocalDate,
@@ -92,7 +182,7 @@ class VillaRepository(
     ): Boolean {
         if (unit.isBlocked) return false
 
-        val bookings = bookingDao.getActiveBookingsForUnit(unit.id)
+        val bookings = _allBookings.value.filter { it.unitId == unit.id && it.bookingStatus != "Cancelled" }
         for (b in bookings) {
             if (excludeBookingId != null && b.id == excludeBookingId) continue
             val bIn = runCatching { LocalDate.parse(b.checkInDate, dateFormatter) }.getOrNull() ?: continue
@@ -142,7 +232,7 @@ class VillaRepository(
         val checkOut = runCatching { LocalDate.parse(booking.checkOutDate, dateFormatter) }.getOrNull()
             ?: return Result.failure(IllegalArgumentException("Invalid check-out date"))
 
-        val unit = roomDao.getUnitById(booking.unitId)
+        val unit = _allUnits.value.find { it.id == booking.unitId }
             ?: return Result.failure(IllegalArgumentException("Room unit not found"))
 
         val available = isUnitAvailable(unit, checkIn, checkOut)
@@ -150,24 +240,90 @@ class VillaRepository(
             return Result.failure(IllegalStateException("Unit ${booking.unitId} is already booked or blocked for selected dates."))
         }
 
-        bookingDao.insertBooking(booking)
-        return Result.success(booking.id)
+        return runCatching {
+            firestore.collection(BOOKINGS_COLLECTION)
+                .document(booking.id)
+                .set(booking.toFirestoreMap())
+                .awaitTask()
+            booking.id
+        }.recoverCatching { e ->
+            throw IllegalStateException(readableFailure(e), e)
+        }
     }
 
     suspend fun updateBookingStatus(bookingId: String, newStatus: String) {
-        bookingDao.updateBookingStatus(bookingId, newStatus)
+        runCatching {
+            firestore.collection(BOOKINGS_COLLECTION)
+                .document(bookingId)
+                .update("bookingStatus", newStatus)
+                .awaitTask()
+        }.onFailure { _syncError.value = readableFailure(it) }
     }
 
     suspend fun updateRoomPrice(unitId: String, newPrice: Double) {
-        roomDao.updatePrice(unitId, newPrice)
+        runCatching {
+            firestore.collection(UNITS_COLLECTION)
+                .document(unitId)
+                .update("pricePerNight", newPrice)
+                .awaitTask()
+        }.onFailure { _syncError.value = readableFailure(it) }
     }
 
     suspend fun toggleRoomBlock(unitId: String, isBlocked: Boolean, reason: String = "") {
-        roomDao.updateBlockStatus(unitId, isBlocked, reason)
+        runCatching {
+            firestore.collection(UNITS_COLLECTION)
+                .document(unitId)
+                .update(mapOf("isBlocked" to isBlocked, "blockedReason" to reason))
+                .awaitTask()
+        }.onFailure { _syncError.value = readableFailure(it) }
     }
 
+    /** Generates a booking id guaranteed not to collide with any currently known booking. */
     fun generateBookingId(): String {
-        val randNum = Random.nextInt(1000, 9999)
-        return "GEV-2026-$randNum"
+        var id: String
+        do {
+            id = "GEV-2026-${Random.nextInt(1000, 9999)}"
+        } while (_allBookings.value.any { it.id == id })
+        return id
+    }
+
+    /**
+     * Forces a fresh server round trip for both collections. The live snapshot listeners
+     * above pick up any resulting changes automatically, so callers just await this and
+     * then know the on-screen data reflects the server.
+     */
+    suspend fun refreshNow(): Result<Unit> = runCatching {
+        firestore.collection(UNITS_COLLECTION).get(Source.SERVER).awaitTask()
+        firestore.collection(BOOKINGS_COLLECTION).get(Source.SERVER).awaitTask()
+        _syncError.value = null
+    }.onFailure { _syncError.value = readableFailure(it) }
+        .map { }
+}
+
+private fun readableFailure(t: Throwable): String =
+    (t as? FirebaseFirestoreException)?.readableMessage() ?: (t.message ?: "Something went wrong. Please try again.")
+
+private fun FirebaseFirestoreException.readableMessage(): String = when (code) {
+    FirebaseFirestoreException.Code.PERMISSION_DENIED -> {
+        val raw = message.orEmpty()
+        if (raw.contains("API", ignoreCase = true) && raw.contains("has not been used", ignoreCase = true)) {
+            "Firestore isn't enabled for this Firebase project yet. Open the Firebase console, create a Firestore database, then try again."
+        } else {
+            "Firestore denied this request. Check the security rules for this project."
+        }
+    }
+    FirebaseFirestoreException.Code.UNAVAILABLE ->
+        "Can't reach Firebase right now. Check your internet connection."
+    FirebaseFirestoreException.Code.NOT_FOUND ->
+        "That record no longer exists."
+    else -> message ?: "Firebase error ($code)."
+}
+
+/** Minimal, dependency-free `Task<T>.await()` so we don't need the play-services-coroutines artifact. */
+private suspend fun <T> Task<T>.awaitTask(): T = suspendCancellableCoroutine { cont ->
+    addOnSuccessListener { result -> cont.resume(result) }
+    addOnFailureListener { exception -> cont.resumeWithException(exception) }
+    addOnCanceledListener {
+        if (cont.isActive) cont.resumeWithException(kotlinx.coroutines.CancellationException("Task was cancelled"))
     }
 }

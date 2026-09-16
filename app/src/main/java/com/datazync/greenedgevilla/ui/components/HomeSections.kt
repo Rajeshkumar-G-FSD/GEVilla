@@ -771,7 +771,7 @@ fun LocationCardSection(
                 ) {
                     Icon(imageVector = Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Share", style = MaterialTheme.typography.labelMedium)
+                    Text("Share via WhatsApp", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
